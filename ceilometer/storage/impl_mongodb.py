@@ -214,6 +214,21 @@ class Connection(pymongo_base.Connection):
                 ('timestamp', pymongo.ASCENDING),
             ], name=name, background=background[primary])
 
+        # NOTE when use MongoDB as meter storage, add
+        # two indexes (meter_instance_idx and meter_resource_idx ) for cloudcommune
+        # business. For JIRA YC-563
+        self.db.meter.create_index([('resource_metadata.instance_id',
+                                     pymongo.ASCENDING),
+                                    ('counter_name', pymongo.ASCENDING),
+                                    ('timestamp', pymongo.ASCENDING)],
+                                   name='meter_instance_idx',
+                                   background=True)
+        self.db.meter.create_index([('resource_id', pymongo.ASCENDING),
+                                    ('counter_name', pymongo.ASCENDING),
+                                    ('timestamp', pymongo.ASCENDING)],
+                                   name='meter_resource_idx',
+                                   background=True)
+
         self.db.meter.create_index([('timestamp', pymongo.DESCENDING)],
                                    name='timestamp_idx')
 
@@ -259,13 +274,6 @@ class Connection(pymongo_base.Connection):
         # unconditionally insert sample timestamps and resource metadata
         # (in the update case, this must be conditional on the sample not
         # being out-of-order)
-
-        # We must not store this
-        samples = copy.deepcopy(samples)
-
-        for sample in samples:
-            sample.pop("monotonic_time", None)
-
         sorted_samples = sorted(
             copy.deepcopy(samples),
             key=lambda s: (s['resource_id'], s['timestamp']))

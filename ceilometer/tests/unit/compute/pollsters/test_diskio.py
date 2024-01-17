@@ -294,9 +294,11 @@ class TestDiskInfoPollsters(TestBaseDiskIO):
 
     DISKS = [
         (virt_inspector.Disk(device='vda1'),
-         virt_inspector.DiskInfo(capacity=3, allocation=2, physical=1)),
+         virt_inspector.DiskInfo(capacity=3, allocation=2, physical=1,
+                                 vmused=-1)),
         (virt_inspector.Disk(device='vda2'),
-         virt_inspector.DiskInfo(capacity=4, allocation=3, physical=2)),
+         virt_inspector.DiskInfo(capacity=4, allocation=3, physical=2,
+                                 vmused=-1)),
     ]
     TYPE = 'gauge'
     CACHE_KEY = "CACHE_KEY_DISK_INFO"

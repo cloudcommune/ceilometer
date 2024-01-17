@@ -62,7 +62,7 @@ class MemberNotInGroupError(Exception):
     def __init__(self, group_id, members, my_id):
         super(MemberNotInGroupError, self).__init__(_LE(
             'Group ID: %(group_id)s, Members: %(members)s, Me: %(me)s: '
-            'Current agent is not part of group and cannot take tasks') %
+            'Current agent is not part of group and cannot take tasks'),
             {'group_id': group_id, 'members': members, 'me': my_id})
 
 
@@ -204,8 +204,8 @@ class PartitionCoordinator(object):
             self.join_group(group_id)
         try:
             members = self._get_members(group_id)
-            LOG.debug('Members of group %s are: %s, Me: %s',
-                      group_id, members, self._my_id)
+            LOG.info('Members of group %s are: %s, Me: %s',
+                     group_id, members, self._my_id)
             if self._my_id not in members:
                 LOG.warning(_LW('Cannot extract tasks because agent failed to '
                                 'join group properly. Rejoining group.'))
@@ -213,15 +213,15 @@ class PartitionCoordinator(object):
                 members = self._get_members(group_id)
                 if self._my_id not in members:
                     raise MemberNotInGroupError(group_id, members, self._my_id)
-                LOG.debug('Members of group %s are: %s, Me: %s',
-                          group_id, members, self._my_id)
+                LOG.info('Members of group %s are: %s, Me: %s',
+                         group_id, members, self._my_id)
             hr = utils.HashRing(members)
             iterable = list(iterable)
             filtered = [v for v in iterable
                         if hr.get_node(six.text_type(v)) == self._my_id]
-            LOG.debug('The universal set: %s, my subset: %s',
-                      [six.text_type(f) for f in iterable],
-                      [six.text_type(f) for f in filtered])
+            LOG.info('The universal set: %s, my subset: %s',
+                     [six.text_type(f) for f in iterable],
+                     [six.text_type(f) for f in filtered])
             return filtered
         except tooz.coordination.ToozError:
             LOG.exception(_LE('Error getting group membership info from '

@@ -80,7 +80,6 @@ class TestPostSamples(v2.FunctionalTest):
         s1[0]['source'] = '%s:openstack' % s1[0]['project_id']
 
         self.assertEqual(s1, data.json)
-        s1[0]["monotonic_time"] = None
         self.assertEqual(s1[0], self.published[0][0])
 
     def test_nested_metadata(self):
@@ -108,7 +107,6 @@ class TestPostSamples(v2.FunctionalTest):
         unwound['resource_metadata'] = {'nest': {'name1': 'value1',
                                                  'name2': 'value3'},
                                         'name2': 'value2'}
-        unwound["monotonic_time"] = None
         # only the published sample should be unwound, not the representation
         # in the API response
         self.assertEqual(s1[0], data.json[0])
@@ -220,7 +218,6 @@ class TestPostSamples(v2.FunctionalTest):
             msg['timestamp'] = timestamp.replace(tzinfo=None).isoformat()
 
             self.assertEqual(s, c)
-            s["monotonic_time"] = None
             self.assertEqual(s, self.published[0][x])
 
     def test_missing_mandatory_fields(self):
@@ -281,7 +278,6 @@ class TestPostSamples(v2.FunctionalTest):
             s['timestamp'] = data.json[x]['timestamp']
             s.setdefault('resource_metadata', dict())
             self.assertEqual(s, data.json[x])
-            s['monotonic_time'] = None
             self.assertEqual(s, self.published[0][x])
 
     def test_multiple_samples_multiple_sources(self):
@@ -332,7 +328,6 @@ class TestPostSamples(v2.FunctionalTest):
             s['timestamp'] = data.json[x]['timestamp']
             s.setdefault('resource_metadata', dict())
             self.assertEqual(s, data.json[x])
-            s['monotonic_time'] = None
             self.assertEqual(s, self.published[0][x])
 
     def test_missing_project_user_id(self):
@@ -369,6 +364,4 @@ class TestPostSamples(v2.FunctionalTest):
             s['project_id'] = project_id
 
             self.assertEqual(s, data.json[x])
-
-            s['monotonic_time'] = None
             self.assertEqual(s, self.published[0][x])

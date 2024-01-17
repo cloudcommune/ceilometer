@@ -21,6 +21,8 @@ try:
 except ImportError:
     libvirt = None
 
+from ceilometer import utils
+
 LOG = logging.getLogger(__name__)
 
 OPTS = [
@@ -102,3 +104,25 @@ def retry_on_disconnect(function):
             else:
                 raise
     return decorator
+
+
+def is_disconnection_exception(e):
+    if not libvirt:
+        return False
+    return (isinstance(e, libvirt.libvirtError)
+            and e.get_error_code() in (libvirt.VIR_ERR_SYSTEM_ERROR,
+                                       libvirt.VIR_ERR_INTERNAL_ERROR)
+            and e.get_error_domain() in (libvirt.VIR_FROM_REMOTE,
+                                         libvirt.VIR_FROM_RPC))
+
+
+def is_timed_out_exception(e):
+    if not libvirt:
+        return False
+    return (isinstance(e, libvirt.libvirtError)
+            and e.get_error_code() == libvirt.VIR_ERR_OPERATION_TIMEOUT
+            and e.get_error_domain() == libvirt.VIR_FROM_QEMU)
+
+
+def execute(*args, **kwargs):
+    return utils.execute(*args, **kwargs)

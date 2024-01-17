@@ -32,6 +32,7 @@ from concurrent import futures
 from futurist import periodics
 from oslo_concurrency import processutils
 from oslo_config import cfg
+from oslo_utils import encodeutils
 from oslo_utils import timeutils
 from oslo_utils import units
 import six
@@ -46,6 +47,24 @@ OPTS = [
 ]
 
 EPOCH_TIME = datetime.datetime(1970, 1, 1)
+
+
+def convert_str(text):
+    """Convert to native string.
+
+    Convert bytes and Unicode strings to native strings:
+
+    * convert to bytes on Python 2:
+      encode Unicode using encodeutils.safe_encode()
+    * convert to Unicode on Python 3: decode bytes from UTF-8
+    """
+    if six.PY2:
+        return encodeutils.to_utf8(text)
+    else:
+        if isinstance(text, bytes):
+            return text.decode('utf-8')
+        else:
+            return text
 
 
 def _get_root_helper():

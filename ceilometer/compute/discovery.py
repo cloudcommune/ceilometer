@@ -150,12 +150,21 @@ class InstanceDiscovery(plugin_base.DiscoveryBase):
     def discover_libvirt_polling(self, manager, param=None):
         instances = []
         for domain in self.connection.listAllDomains():
+            try:
+                xml_string = domain.metadata(
+                    libvirt.VIR_DOMAIN_METADATA_ELEMENT,
+                    "http://openstack.org/xmlns/libvirt/nova/1.0")
+            except libvirt.libvirtError as e:
+                if libvirt_utils.is_disconnection_exception(e):
+                    # Re-raise the exception so it's handled and retries
+                    raise
+                LOG.error(
+                    "Fail to get domain uuid %s metadata, libvirtError: %s",
+                    domain.UUIDString(), e.message)
+                continue
+
             full_xml = etree.fromstring(domain.XMLDesc())
             os_type_xml = full_xml.find("./os/type")
-
-            xml_string = domain.metadata(
-                libvirt.VIR_DOMAIN_METADATA_ELEMENT,
-                "http://openstack.org/xmlns/libvirt/nova/1.0")
             metadata_xml = etree.fromstring(xml_string)
 
             # TODO(sileht): We don't have the flavor ID here So the Gnocchi
@@ -166,55 +175,42 @@ class InstanceDiscovery(plugin_base.DiscoveryBase):
             # flavor. this is why nova doesn't put the id in the libvirt
             # metadata
 
-            try:
-                flavor_xml = metadata_xml.find(
-                    "./flavor")
-                user_id = metadata_xml.find(
-                    "./owner/user").attrib["uuid"]
-                project_id = metadata_xml.find(
-                    "./owner/project").attrib["uuid"]
-                instance_name = metadata_xml.find(
-                    "./name").text
-                instance_arch = os_type_xml.attrib["arch"]
-
-                flavor = {
-                    "id": self.get_flavor_id(flavor_xml.attrib["name"]),
-                    "name": flavor_xml.attrib["name"],
-                    "vcpus": self._safe_find_int(flavor_xml, "vcpus"),
-                    "ram": self._safe_find_int(flavor_xml, "memory"),
-                    "disk": self._safe_find_int(flavor_xml, "disk"),
-                    "ephemeral": self._safe_find_int(flavor_xml, "ephemeral"),
-                    "swap": self._safe_find_int(flavor_xml, "swap"),
-                }
-
-                # The image description is partial, but Gnocchi only care about
-                # the id, so we are fine
-                image_xml = metadata_xml.find("./root[@type='image']")
-                image = ({'id': image_xml.attrib['uuid']}
-                         if image_xml is not None else None)
-            except AttributeError:
-                LOG.error(
-                    "Fail to get domain uuid %s metadata: "
-                    "metadata was missing expected attributes",
-                    domain.UUIDString())
-                continue
-
+            # This implements
+            flavor_xml = metadata_xml.find("./flavor")
+            flavor = {
+                "id": self.get_flavor_id(flavor_xml.attrib["name"]),
+                "name": flavor_xml.attrib["name"],
+                "vcpus": self._safe_find_int(flavor_xml, "vcpus"),
+                "ram": self._safe_find_int(flavor_xml, "memory"),
+                "disk": self._safe_find_int(flavor_xml, "disk"),
+                "ephemeral": self._safe_find_int(flavor_xml, "ephemeral"),
+                "swap": self._safe_find_int(flavor_xml, "swap"),
+            }
             dom_state = domain.state()[0]
             vm_state = libvirt_utils.LIBVIRT_POWER_STATE.get(dom_state)
             status = libvirt_utils.LIBVIRT_STATUS.get(dom_state)
+
+            user_id = metadata_xml.find("./owner/user").attrib["uuid"]
+            project_id = metadata_xml.find("./owner/project").attrib["uuid"]
 
             # From:
             # https://github.com/openstack/nova/blob/852f40fd0c6e9d8878212ff3120556668023f1c4/nova/api/openstack/compute/views/servers.py#L214-L220
             host_id = hashlib.sha224(
                 (project_id + self.conf.host).encode('utf-8')).hexdigest()
 
+            # The image description is partial, but Gnocchi only care about the
+            # id, so we are fine
+            image_xml = metadata_xml.find("./root[@type='image']")
+            image = ({'id': image_xml.attrib['uuid']}
+                     if image_xml is not None else None)
+
             instance_data = {
                 "id": domain.UUIDString(),
-                "name": instance_name,
+                "name": metadata_xml.find("./name").text,
                 "flavor": flavor,
                 "image": image,
                 "os_type": os_type_xml.text,
-                "architecture": instance_arch,
+                "architecture": os_type_xml.attrib["arch"],
 
                 "OS-EXT-SRV-ATTR:instance_name": domain.name(),
                 "OS-EXT-SRV-ATTR:host": self.conf.host,

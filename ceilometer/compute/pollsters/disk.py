@@ -17,7 +17,6 @@
 import abc
 import collections
 
-import monotonic
 from oslo_log import log
 import six
 
@@ -34,7 +33,7 @@ LOG = log.getLogger(__name__)
 
 DiskIOData = collections.namedtuple(
     'DiskIOData',
-    'r_bytes r_requests w_bytes w_requests per_disk_requests polled_time',
+    'r_bytes r_requests w_bytes w_requests per_disk_requests',
 )
 
 DiskRateData = collections.namedtuple('DiskRateData',
@@ -56,6 +55,7 @@ DiskInfoData = collections.namedtuple('DiskInfoData',
                                       ['capacity',
                                        'allocation',
                                        'physical',
+                                       'vmused',
                                        'per_disk_info'])
 
 
@@ -104,14 +104,12 @@ class _Base(pollsters.BaseComputePollster):
                 'write_bytes': per_device_write_bytes,
                 'write_requests': per_device_write_requests,
             }
-            polled_time = monotonic.monotonic()
             i_cache[instance.id] = DiskIOData(
                 r_bytes=r_bytes,
                 r_requests=r_requests,
                 w_bytes=w_bytes,
                 w_requests=w_requests,
                 per_disk_requests=per_device_requests,
-                polled_time=polled_time
             )
         return i_cache[instance.id]
 
@@ -131,15 +129,13 @@ class _Base(pollsters.BaseComputePollster):
             volume=getattr(c_data, _volume),
             additional_metadata={
                 'device': c_data.per_disk_requests[_metadata].keys()},
-            monotonic_time=c_data.polled_time,
         )]
 
     def _get_samples_per_device(self, c_data, _attr, instance, _name, _unit):
         """Return one or more Samples for meter 'disk.device.*'"""
         return self._get_samples_per_devices(c_data.per_disk_requests[_attr],
                                              instance, _name,
-                                             sample.TYPE_CUMULATIVE, _unit,
-                                             c_data.polled_time)
+                                             sample.TYPE_CUMULATIVE, _unit)
 
     def get_samples(self, manager, cache, resources):
         for instance in resources:
@@ -554,28 +550,34 @@ class _DiskInfoPollsterBase(pollsters.BaseComputePollster):
             all_capacity = 0
             all_allocation = 0
             all_physical = 0
+            all_vmused = 0
             per_disk_capacity = {}
             per_disk_allocation = {}
             per_disk_physical = {}
+            per_disk_vmused = {}
             disk_info = inspector.inspect_disk_info(
                 instance)
             for disk, info in disk_info:
                 all_capacity += info.capacity
                 all_allocation += info.allocation
                 all_physical += info.physical
+                all_vmused += info.vmused
 
                 per_disk_capacity[disk.device] = info.capacity
                 per_disk_allocation[disk.device] = info.allocation
                 per_disk_physical[disk.device] = info.physical
+                per_disk_vmused[disk.device] = info.vmused
             per_disk_info = {
                 'capacity': per_disk_capacity,
                 'allocation': per_disk_allocation,
                 'physical': per_disk_physical,
+                'vmused': per_disk_vmused
             }
             i_cache[instance.id] = DiskInfoData(
                 all_capacity,
                 all_allocation,
                 all_physical,
+                all_vmused,
                 per_disk_info
             )
         return i_cache[instance.id]
@@ -690,3 +692,18 @@ class PerDevicePhysicalPollster(_DiskInfoPollsterBase):
     def _get_samples(self, instance, disk_info):
         return self._get_samples_per_device(
             disk_info, 'physical', instance, 'disk.device.usage')
+
+
+class VMusedPollster(_DiskInfoPollsterBase):
+
+    def _get_samples(self, instance, disk_info):
+        return self._get_samples_task(
+            instance, 'disk.vmused', disk_info,
+            'vmused', 'vmused')
+
+
+class PerDeviceVMusedPollster(_DiskInfoPollsterBase):
+
+    def _get_samples(self, instance, disk_info):
+        return self._get_samples_per_device(
+            disk_info, 'vmused', instance, 'disk.device.vmused')

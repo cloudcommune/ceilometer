@@ -110,10 +110,7 @@ class SamplePipelineEndpoint(PipelineEndpoint):
                                resource_id=s['resource_id'],
                                timestamp=s['timestamp'],
                                resource_metadata=s['resource_metadata'],
-                               source=s.get('source'),
-                               # NOTE(sileht): May come from an older node,
-                               # Put None in this case.
-                               monotonic_time=s.get('monotonic_time'))
+                               source=s.get('source'))
             for s in samples if publisher_utils.verify_signature(
                 s, self.conf.publisher.telemetry_secret)
         ]
@@ -444,6 +441,8 @@ class Sink(object):
         transformers = []
         for transformer in self.transformer_cfg:
             parameter = transformer['parameters'] or {}
+            # NOTE(xiexianbin) inject CONF to transformer method
+            parameter["conf"] = self.conf
             try:
                 ext = transformer_manager[transformer['name']]
             except KeyError:

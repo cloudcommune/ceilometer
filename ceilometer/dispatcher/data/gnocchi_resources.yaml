@@ -60,6 +60,7 @@ resources:
       - 'disk.capacity'
       - 'disk.allocation'
       - 'disk.usage'
+      - 'disk.vmused'
       - 'compute.instance.booting.time'
       - 'perf.cpu.cycles'
       - 'perf.instructions'
@@ -111,6 +112,7 @@ resources:
       - 'disk.device.capacity'
       - 'disk.device.allocation'
       - 'disk.device.usage'
+      - 'disk.device.vmused'
     attributes:
       name: resource_metadata.disk_name
       instance_id: resource_metadata.instance_id

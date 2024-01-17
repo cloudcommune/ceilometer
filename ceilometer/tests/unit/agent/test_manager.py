@@ -63,7 +63,7 @@ class TestManager(base.BaseTestCase):
     def test_load_plugins_pollster_list(self):
         mgr = manager.AgentManager(0, self.conf, pollster_list=['disk.*'])
         # currently we do have 26 disk-related pollsters
-        self.assertEqual(26, len(list(mgr.extensions)))
+        self.assertEqual(28, len(list(mgr.extensions)))
 
     def test_load_invalid_plugins_pollster_list(self):
         # if no valid pollsters have been loaded, the ceilometer

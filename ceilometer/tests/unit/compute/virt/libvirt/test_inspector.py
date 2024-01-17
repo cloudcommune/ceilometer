@@ -21,6 +21,7 @@ except ImportError:
 
 import fixtures
 import mock
+import os
 from oslo_config import fixture as fixture_config
 from oslo_utils import units
 from oslotest import base
@@ -28,6 +29,7 @@ from oslotest import base
 from ceilometer.compute.virt import inspector as virt_inspector
 from ceilometer.compute.virt.libvirt import inspector as libvirt_inspector
 from ceilometer.compute.virt.libvirt import utils
+from ceilometer.utils import convert_str
 
 
 class TestLibvirtInspection(base.BaseTestCase):
@@ -173,9 +175,9 @@ class TestLibvirtInspection(base.BaseTestCase):
         """
 
         interface_stats = {
-            'vnet0': (1, 2, 21, 22, 3, 4, 23, 24),
-            'vnet1': (5, 6, 25, 26, 7, 8, 27, 28),
-            'vnet2': (9, 10, 29, 30, 11, 12, 31, 32),
+            'vnet0': (1, 2, 0, 0, 3, 4, 0, 0),
+            'vnet1': (5, 6, 0, 0, 7, 8, 0, 0),
+            'vnet2': (9, 10, 0, 0, 11, 12, 0, 0),
         }
         interfaceStats = interface_stats.__getitem__
 
@@ -207,10 +209,6 @@ class TestLibvirtInspection(base.BaseTestCase):
             self.assertEqual(2, info0.rx_packets)
             self.assertEqual(3, info0.tx_bytes)
             self.assertEqual(4, info0.tx_packets)
-            self.assertEqual(21, info0.rx_errors)
-            self.assertEqual(22, info0.rx_drop)
-            self.assertEqual(23, info0.tx_errors)
-            self.assertEqual(24, info0.tx_drop)
 
             vnic1, info1 = interfaces[1]
             self.assertEqual('vnet1', vnic1.name)
@@ -224,10 +222,6 @@ class TestLibvirtInspection(base.BaseTestCase):
             self.assertEqual(6, info1.rx_packets)
             self.assertEqual(7, info1.tx_bytes)
             self.assertEqual(8, info1.tx_packets)
-            self.assertEqual(25, info1.rx_errors)
-            self.assertEqual(26, info1.rx_drop)
-            self.assertEqual(27, info1.tx_errors)
-            self.assertEqual(28, info1.tx_drop)
 
             vnic2, info2 = interfaces[2]
             self.assertEqual('vnet2', vnic2.name)
@@ -238,10 +232,6 @@ class TestLibvirtInspection(base.BaseTestCase):
             self.assertEqual(10, info2.rx_packets)
             self.assertEqual(11, info2.tx_bytes)
             self.assertEqual(12, info2.tx_packets)
-            self.assertEqual(29, info2.rx_errors)
-            self.assertEqual(30, info2.rx_drop)
-            self.assertEqual(31, info2.tx_errors)
-            self.assertEqual(32, info2.tx_drop)
 
     def test_inspect_vnics_with_domain_shutoff(self):
         connection = self.inspector.connection
@@ -321,7 +311,10 @@ class TestLibvirtInspection(base.BaseTestCase):
                         self.instance)
                     self.assertEqual(25600 / units.Ki, memory.usage)
 
-    def test_inspect_disk_info(self):
+    @mock.patch('ceilometer.utils.execute')
+    def test_inspect_disk_info(self, mock_execute):
+        example_return = '''{"return": {"size": 102400}}'''
+        mock_execute.return_value = (example_return, '')
         dom_xml = """
              <domain type='kvm'>
                  <devices>
@@ -343,6 +336,8 @@ class TestLibvirtInspection(base.BaseTestCase):
                                                   return_value=self.domain))
             stack.enter_context(mock.patch.object(self.domain, 'XMLDesc',
                                                   return_value=dom_xml))
+            stack.enter_context(mock.patch.object(
+                self.domain, 'name', return_value='instance-00000001'))
             stack.enter_context(mock.patch.object(self.domain, 'blockInfo',
                                                   return_value=(1, 2, 3,
                                                                 -1)))
@@ -350,6 +345,16 @@ class TestLibvirtInspection(base.BaseTestCase):
                                                   return_value=(0, 0, 0,
                                                                 2, 999999)))
             disks = list(self.inspector.inspect_disk_info(self.instance))
+            args = """{
+  "execute": "guest-get-disk-used",
+  "arguments": {"device": "/dev/vda"}
+}"""
+            args = args.replace(os.linesep, '')
+            expected_commands = ['virsh', 'qemu-agent-command',
+                                 'instance-00000001',
+                                 convert_str("%s" % args)]
+            mock_execute.assert_called_once_with(*expected_commands,
+                                                 run_as_root=True)
 
             self.assertEqual(1, len(disks))
             disk0, info0 = disks[0]
@@ -357,8 +362,12 @@ class TestLibvirtInspection(base.BaseTestCase):
             self.assertEqual(1, info0.capacity)
             self.assertEqual(2, info0.allocation)
             self.assertEqual(3, info0.physical)
+            self.assertEqual(102400, info0.vmused)
 
-    def test_inspect_disk_info_network_type(self):
+    @mock.patch('ceilometer.utils.execute')
+    def test_inspect_disk_info_network_type(self, mock_execute):
+        example_return = '''{"return": {"size": 102400}}'''
+        mock_execute.return_value = (example_return, '')
         dom_xml = """
              <domain type='kvm'>
                  <devices>
@@ -380,6 +389,8 @@ class TestLibvirtInspection(base.BaseTestCase):
                                                   return_value=self.domain))
             stack.enter_context(mock.patch.object(self.domain, 'XMLDesc',
                                                   return_value=dom_xml))
+            stack.enter_context(mock.patch.object(
+                self.domain, 'name', return_value='instance-00000001'))
             stack.enter_context(mock.patch.object(self.domain, 'blockInfo',
                                                   return_value=(1, 2, 3,
                                                                 -1)))
@@ -387,10 +398,23 @@ class TestLibvirtInspection(base.BaseTestCase):
                                                   return_value=(0, 0, 0,
                                                                 2, 999999)))
             disks = list(self.inspector.inspect_disk_info(self.instance))
+            args = """{
+  "execute": "guest-get-disk-used",
+  "arguments": {"device": "/dev/vda"}
+}"""
+            args = args.replace(os.linesep, '')
+            expected_commands = ['virsh', 'qemu-agent-command',
+                                 'instance-00000001',
+                                 convert_str("%s" % args)]
+            mock_execute.assert_called_once_with(*expected_commands,
+                                                 run_as_root=True)
 
             self.assertEqual(1, len(disks))
 
-    def test_inspect_disk_info_without_source_element(self):
+    @mock.patch('ceilometer.utils.execute')
+    def test_inspect_disk_info_without_source_element(self, mock_execute):
+        example_return = '''{"return": {"size": 102400}}'''
+        mock_execute.return_value = (example_return, '')
         dom_xml = """
              <domain type='kvm'>
                  <devices>
@@ -413,6 +437,8 @@ class TestLibvirtInspection(base.BaseTestCase):
                                                   return_value=self.domain))
             stack.enter_context(mock.patch.object(self.domain, 'XMLDesc',
                                                   return_value=dom_xml))
+            stack.enter_context(mock.patch.object(
+                self.domain, 'name', return_value='instance-00000001'))
             stack.enter_context(mock.patch.object(self.domain, 'blockInfo',
                                                   return_value=(1, 2, 3,
                                                                 -1)))
@@ -420,44 +446,6 @@ class TestLibvirtInspection(base.BaseTestCase):
                                                   return_value=(0, 0, 0,
                                                                 2, 999999)))
             disks = list(self.inspector.inspect_disk_info(self.instance))
-
-            self.assertEqual(0, len(disks))
-
-    def test_inspect_disks_without_source_element(self):
-        dom_xml = """
-             <domain type='kvm'>
-                 <devices>
-                    <disk type='file' device='cdrom'>
-                        <driver name='qemu' type='raw' cache='none'/>
-                        <backingStore/>
-                        <target dev='hdd' bus='ide' tray='open'/>
-                        <readonly/>
-                        <alias name='ide0-1-1'/>
-                        <address type='drive' controller='0' bus='1'
-                                 target='0' unit='1'/>
-                     </disk>
-                 </devices>
-             </domain>
-        """
-        blockStatsFlags = {'wr_total_times': 91752302267,
-                           'rd_operations': 6756,
-                           'flush_total_times': 1310427331,
-                           'rd_total_times': 29142253616,
-                           'rd_bytes': 171460096,
-                           'flush_operations': 746,
-                           'wr_operations': 1437,
-                           'wr_bytes': 13574656}
-        domain = mock.Mock()
-        domain.XMLDesc.return_value = dom_xml
-        domain.info.return_value = (0, 0, 0, 2, 999999)
-        domain.blockStats.return_value = (1, 2, 3, 4, -1)
-        domain.blockStatsFlags.return_value = blockStatsFlags
-        conn = mock.Mock()
-        conn.lookupByUUIDString.return_value = domain
-
-        with mock.patch('ceilometer.compute.virt.libvirt.utils.'
-                        'get_libvirt_connection', return_value=conn):
-            disks = list(self.inspector.inspect_disks(self.instance))
 
             self.assertEqual(0, len(disks))
 

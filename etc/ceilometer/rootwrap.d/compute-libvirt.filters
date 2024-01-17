@@ -1,0 +1,6 @@
+# ceilometer-rootwrap command filters for compute capable nodes
+# This file should be owned by (and only-writeable by) the root user
+
+[Filters]
+# ceilometer/compute/virt/libvirt/inspector.py: 'virsh'
+virsh: CommandFilter, virsh, root

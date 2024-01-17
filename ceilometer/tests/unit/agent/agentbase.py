@@ -301,7 +301,7 @@ class BaseAgentManagerTestCase(base.BaseTestCase):
         self.mgr.run()
         setup_polling.assert_called_once_with(self.CONF)
         mpc.start.assert_called_once_with()
-        self.assertEqual(2, mpc.join_group.call_count)
+        self.assertEqual(3, mpc.join_group.call_count)
         self.mgr.setup_polling_tasks.assert_called_once_with()
 
         # Wait first heatbeat

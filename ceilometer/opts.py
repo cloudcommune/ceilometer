@@ -15,6 +15,7 @@ import itertools
 import socket
 
 from keystoneauth1 import loading
+from oslo_cache import core as cache_core
 from oslo_config import cfg
 
 import ceilometer.agent.manager
@@ -36,6 +37,7 @@ import ceilometer.event.converter
 import ceilometer.exchange_control
 import ceilometer.hardware.discovery
 import ceilometer.hardware.pollsters.generic
+import ceilometer.host.discovery
 import ceilometer.image.discovery
 import ceilometer.ipmi.notifications.ironic
 import ceilometer.ipmi.platform.intel_node_manager
@@ -89,6 +91,7 @@ def list_opts():
                          ceilometer.sample.OPTS,
                          ceilometer.utils.OPTS,
                          ceilometer.exchange_control.EXCHANGE_OPTS,
+                         ceilometer.host.discovery.OPTS,
                          OPTS)),
         ('api', itertools.chain(ceilometer.api.app.API_OPTS,
                                 ceilometer.api.controllers.v2.root.API_OPTS)),
@@ -124,6 +127,7 @@ def list_opts():
         ('storage', ceilometer.dispatcher.STORAGE_OPTS),
         ('vmware', ceilometer.compute.virt.vmware.inspector.OPTS),
         ('xenapi', ceilometer.compute.virt.xenapi.inspector.OPTS),
+        ('cache', cache_core._opts.FILE_OPTIONS.get("cache")),
     ]
 
 

@@ -190,7 +190,22 @@ DiskIOPSStats = collections.namedtuple('DiskIOPSStats',
 DiskInfo = collections.namedtuple('DiskInfo',
                                   ['capacity',
                                    'allocation',
-                                   'physical'])
+                                   'physical',
+                                   'vmused'])
+
+
+# Named tuple representing gpu Information.
+#
+# memory_total: memory total of the gpu
+# memory_used: memory used of the gpu
+# temperature: temperature of the gpu
+# util: usage of the gpu
+
+GpuInfo = collections.namedtuple('GpuInfo',
+                                 ['memory_total',
+                                  'memory_used',
+                                  'temperature',
+                                  'util'])
 
 
 # Exception types
@@ -360,7 +375,7 @@ def get_hypervisor_inspector(conf):
         mgr = driver.DriverManager(namespace,
                                    conf.hypervisor_inspector,
                                    invoke_on_load=True,
-                                   invoke_args=(conf, ))
+                                   invoke_args=(conf,))
         return mgr.driver
     except ImportError as e:
         LOG.error(_LE("Unable to load the hypervisor inspector: %s") % e)

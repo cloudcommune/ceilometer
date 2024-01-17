@@ -195,12 +195,14 @@ class SNMPInspector(base.Inspector):
     def get_oid_value(oid_cache, oid_def, suffix='', host=None):
         oid, converter = oid_def
         value = oid_cache[oid + suffix]
-        if isinstance(value, (rfc1905.NoSuchObject, rfc1905.NoSuchInstance)):
-            LOG.debug("OID %s%s has no value" % (
-                oid, " on %s" % host.hostname if host else ""))
-            return None
         if converter:
-            value = converter(value)
+            try:
+                value = converter(value)
+            except ValueError:
+                if isinstance(value, rfc1905.NoSuchObject):
+                    LOG.debug("OID %s%s has no value" % (
+                        oid, " on %s" % host.hostname if host else ""))
+                    return None
         return value
 
     @classmethod
@@ -272,12 +274,8 @@ class SNMPInspector(base.Inspector):
         _memory_total_oid = "1.3.6.1.4.1.2021.4.5.0"
         if _memory_total_oid not in cache[self._CACHE_KEY_OID]:
             self._query_oids(host, [_memory_total_oid], cache, False)
-
-        total_value = self.get_oid_value(cache[self._CACHE_KEY_OID],
-                                         (_memory_total_oid, int))
-        if total_value is None:
-            return None
-        return total_value - value
+        value = int(cache[self._CACHE_KEY_OID][_memory_total_oid]) - value
+        return value
 
     def _post_op_net(self, host, cache, meter_def,
                      value, metadata, extra, suffix):

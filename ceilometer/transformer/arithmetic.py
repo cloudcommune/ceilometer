@@ -103,13 +103,16 @@ class ArithmeticTransformer(transformer.TransformerBase):
     def flush(self):
         new_samples = []
         if not self.misconfigured:
-            # When loop self.cache, the dict could not be change by others.
-            # If changed, will raise "RuntimeError: dictionary changed size
-            # during iteration". so we make a tmp copy and just loop it.
+            # NOTE(xiexianbin) when loop self.cache, the dict could
+            # not be change by others. if changed, will raise "RuntimeError:
+            # dictionary changed size during iteration". so we make a copy
+            # and just loop the copy(tmp_cache).
             tmp_cache = copy.copy(self.cache)
             for resource_id in tmp_cache:
                 if self._check_requirements(resource_id):
                     new_samples.append(self._calculate(resource_id))
+                    # NOTE(xiexianbin) NO NEED to cache
+                    # resource_ids, just pop from self.cache dict.
                     if resource_id in self.cache:
                         self.cache.pop(resource_id)
         return new_samples

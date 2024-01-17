@@ -73,6 +73,30 @@ class Client(object):
         return resp.get('ports')
 
     @logged
+    def get_network_ports(self, network_id):
+        params = {
+            'network_id': network_id,
+        }
+        resp = self.client.list_ports(**params)
+        # LOG.debug("ports of network: %s \n %s", network_id, str(resp))
+        return resp.get('ports')
+
+    @logged
+    def get_external_networks(self):
+        params = {
+            'router:external': True,
+        }
+
+        resp = self.client.list_networks(**params)
+        # LOG.debug("external networks: %s", str(resp))
+        return resp.get("networks")
+
+    @logged
+    def port_get(self, port):
+        resp = self.client.show_port(port)
+        return resp.get('port')
+
+    @logged
     def vip_get_all(self):
         resp = self.client.list_vips()
         return resp.get('vips')
@@ -186,7 +210,11 @@ class Client(object):
         pools = self.client.list_lbaas_pools().get('pools')
         for pool in pools:
             pool_id = pool.get('id')
-            listener_id = pool.get('listeners')[0].get('id')
+            listeners = pool.get('listeners')
+            if not listeners:
+                continue
+            # NOTE(sileht): Can we have more than 1 listener
+            listener_id = listeners[0].get('id')
             lb_id = self._get_loadbalancer_id_with_listener_id(listener_id)
             status = self._get_member_status(lb_id, [listener_id, pool_id])
             resp = self.client.list_lbaas_members(pool_id)

@@ -21,9 +21,10 @@ import traceback
 import unittest
 
 import mock
-import monotonic
+from oslo_cache import core as cache_core
 from oslo_config import fixture as fixture_config
 from oslo_utils import timeutils
+from oslo_utils import uuidutils
 from oslotest import mockpatch
 import six
 from stevedore import extension
@@ -91,7 +92,9 @@ class BasePipelineTestCase(base.BaseTestCase):
         samples = []
         grouping_keys = ['counter_name']
 
-        def __init__(self, append_name='_update'):
+        def __init__(self, append_name='_update', **kwargs):
+            super(BasePipelineTestCase.TransformerClass, self).__init__(
+                **kwargs)
             self.__class__.samples = []
             self.append_name = append_name
 
@@ -118,7 +121,9 @@ class BasePipelineTestCase(base.BaseTestCase):
         samples = []
         grouping_keys = ['resource_id']
 
-        def __init__(self):
+        def __init__(self, **kwargs):
+            super(BasePipelineTestCase.TransformerClassDrop, self).__init__(
+                **kwargs)
             self.__class__.samples = []
 
         def handle_sample(self, counter):
@@ -134,6 +139,7 @@ class BasePipelineTestCase(base.BaseTestCase):
     def setUp(self):
         super(BasePipelineTestCase, self).setUp()
         self.CONF = self.useFixture(fixture_config.Config()).conf
+        cache_core.configure(self.CONF)
 
         self.test_counter = sample.Sample(
             name='a',
@@ -952,6 +958,8 @@ class BasePipelineTestCase(base.BaseTestCase):
         now = timeutils.utcnow()
         later = now + datetime.timedelta(minutes=offset)
         um = {'autoscaling_weight': weight} if weight else {}
+        test_resource = 'test_resource_' + uuidutils.generate_uuid()
+        test_resource2 = 'test_resource2_' + uuidutils.generate_uuid()
         counters = [
             sample.Sample(
                 name='cpu',
@@ -960,7 +968,7 @@ class BasePipelineTestCase(base.BaseTestCase):
                 unit='ns',
                 user_id='test_user',
                 project_id='test_proj',
-                resource_id='test_resource',
+                resource_id=test_resource,
                 timestamp=now.isoformat(),
                 resource_metadata={'cpu_number': 4,
                                    'user_metadata': um},
@@ -972,7 +980,7 @@ class BasePipelineTestCase(base.BaseTestCase):
                 unit='ns',
                 user_id='test_user',
                 project_id='test_proj',
-                resource_id='test_resource2',
+                resource_id=test_resource2,
                 timestamp=now.isoformat(),
                 resource_metadata={'cpu_number': 2,
                                    'user_metadata': um},
@@ -984,7 +992,7 @@ class BasePipelineTestCase(base.BaseTestCase):
                 unit='ns',
                 user_id='test_user',
                 project_id='test_proj',
-                resource_id='test_resource',
+                resource_id=test_resource,
                 timestamp=later.isoformat(),
                 resource_metadata={'cpu_number': 4,
                                    'user_metadata': um},
@@ -996,7 +1004,7 @@ class BasePipelineTestCase(base.BaseTestCase):
                 unit='ns',
                 user_id='test_user',
                 project_id='test_proj',
-                resource_id='test_resource2',
+                resource_id=test_resource2,
                 timestamp=later.isoformat(),
                 resource_metadata={'cpu_number': 2,
                                    'user_metadata': um},
@@ -1014,13 +1022,13 @@ class BasePipelineTestCase(base.BaseTestCase):
         self.assertEqual(2, len(publisher.samples))
         cpu_util = publisher.samples[0]
         self.assertEqual('cpu_util', getattr(cpu_util, 'name'))
-        self.assertEqual('test_resource', getattr(cpu_util, 'resource_id'))
+        self.assertEqual(test_resource, getattr(cpu_util, 'resource_id'))
         self.assertEqual('%', getattr(cpu_util, 'unit'))
         self.assertEqual(sample.TYPE_GAUGE, getattr(cpu_util, 'type'))
         self.assertEqual(expected, getattr(cpu_util, 'volume'))
         cpu_util = publisher.samples[1]
         self.assertEqual('cpu_util', getattr(cpu_util, 'name'))
-        self.assertEqual('test_resource2', getattr(cpu_util, 'resource_id'))
+        self.assertEqual(test_resource2, getattr(cpu_util, 'resource_id'))
         self.assertEqual('%', getattr(cpu_util, 'unit'))
         self.assertEqual(sample.TYPE_GAUGE, getattr(cpu_util, 'type'))
         self.assertEqual(expected * 2, getattr(cpu_util, 'volume'))
@@ -1038,12 +1046,6 @@ class BasePipelineTestCase(base.BaseTestCase):
                                                 27.5,
                                                 weight=1.1)
 
-    def test_rate_of_change_conversion_negative_cumulative_delta(self):
-        self._do_test_rate_of_change_conversion(180000000000,
-                                                120000000000,
-                                                sample.TYPE_CUMULATIVE,
-                                                50.0)
-
     def test_rate_of_change_conversion_negative_gauge_delta(self):
         self._do_test_rate_of_change_conversion(180000000000,
                                                 120000000000,
@@ -1056,6 +1058,89 @@ class BasePipelineTestCase(base.BaseTestCase):
                                                 sample.TYPE_CUMULATIVE,
                                                 0.0,
                                                 offset=0)
+
+    def test_rate_of_change_conversion_negative_cumulative_delta(self):
+        map_from = {'name': 'network\\.(incoming|outgoing)\\.bytes',
+                    'unit': 'B'}
+        map_to = {'name': 'network.\\1.bytes.rate',
+                  'unit': '\\1/s'}
+        transformer_cfg = [
+            {
+                'name': 'rate_of_change',
+                'parameters': {
+                    'source': {
+                        'map_from': map_from
+                    },
+                    'target': {
+                        'map_to': map_to,
+                        'type': sample.TYPE_GAUGE
+                    },
+                },
+            },
+        ]
+        self._set_pipeline_cfg('transformers', transformer_cfg)
+        self._set_pipeline_cfg('meters', ['network.incoming.bytes',
+                                          'network.outgoing.bytes'])
+        now = datetime.datetime.utcnow()
+        later1 = now + datetime.timedelta(minutes=1)
+        later2 = now + datetime.timedelta(minutes=2)
+        later3 = now + datetime.timedelta(minutes=3)
+        counters = [
+            sample.Sample(
+                name='network.incoming.bytes',
+                type=sample.TYPE_CUMULATIVE,
+                volume=180000000000,
+                unit='B',
+                user_id='test_user',
+                project_id='test_proj',
+                resource_id='test_resource',
+                timestamp=now.isoformat(),
+                resource_metadata={},
+            ),
+            sample.Sample(
+                name='network.incoming.bytes',
+                type=sample.TYPE_CUMULATIVE,
+                volume=180000001024,
+                unit='B',
+                user_id='test_user',
+                project_id='test_proj',
+                resource_id='test_resource',
+                timestamp=later1.isoformat(),
+                resource_metadata={},
+            ),
+            sample.Sample(
+                name='network.incoming.bytes',
+                type=sample.TYPE_CUMULATIVE,
+                volume=1024,
+                unit='B',
+                user_id='test_user',
+                project_id='test_proj',
+                resource_id='test_resource',
+                timestamp=later2.isoformat(),
+                resource_metadata={},
+            ),
+            sample.Sample(
+                name='network.incoming.bytes',
+                type=sample.TYPE_CUMULATIVE,
+                volume=2048,
+                unit='B',
+                user_id='test_user',
+                project_id='test_proj',
+                resource_id='test_resource',
+                timestamp=later3.isoformat(),
+                resource_metadata={},
+            ),
+        ]
+        pipeline_manager = pipeline.PipelineManager(
+            self.CONF,
+            self.cfg2file(self.pipeline_cfg), self.transformer_manager)
+        pipe = pipeline_manager.pipelines[0]
+
+        pipe.publish_data(counters)
+        publisher = pipeline_manager.pipelines[0].publishers[0]
+        self.assertEqual(2, len(publisher.samples))
+        pipe.flush()
+        self.assertEqual(2, len(publisher.samples))
 
     def test_rate_of_change_no_predecessor(self):
         s = "100.0 / (10**9 * (resource_metadata.cpu_number or 1))"
@@ -1073,6 +1158,7 @@ class BasePipelineTestCase(base.BaseTestCase):
         ]
         self._set_pipeline_cfg('transformers', transformer_cfg)
         self._set_pipeline_cfg('meters', ['cpu'])
+        test_resource = 'test_resource_' + uuidutils.generate_uuid()
         now = timeutils.utcnow()
         counters = [
             sample.Sample(
@@ -1082,7 +1168,7 @@ class BasePipelineTestCase(base.BaseTestCase):
                 unit='ns',
                 user_id='test_user',
                 project_id='test_proj',
-                resource_id='test_resource',
+                resource_id=test_resource,
                 timestamp=now.isoformat(),
                 resource_metadata={'cpu_number': 4}
             ),
@@ -1097,67 +1183,6 @@ class BasePipelineTestCase(base.BaseTestCase):
         self.assertEqual(0, len(publisher.samples))
         pipe.flush()
         self.assertEqual(0, len(publisher.samples))
-
-    def test_rate_of_change_precision(self):
-        s = "100.0 / (10**9 * (resource_metadata.cpu_number or 1))"
-        transformer_cfg = [
-            {
-                'name': 'rate_of_change',
-                'parameters': {
-                    'source': {},
-                    'target': {'name': 'cpu_util',
-                               'unit': '%',
-                               'type': sample.TYPE_GAUGE,
-                               'scale': s}
-                }
-            },
-        ]
-        self._set_pipeline_cfg('transformers', transformer_cfg)
-        self._set_pipeline_cfg('meters', ['cpu'])
-        pipeline_manager = pipeline.PipelineManager(
-            self.CONF,
-            self.cfg2file(self.pipeline_cfg), self.transformer_manager)
-        pipe = pipeline_manager.pipelines[0]
-
-        now = timeutils.utcnow()
-        now_time = monotonic.monotonic()
-        # Simulate a laggy poller
-        later = now + datetime.timedelta(seconds=12345)
-        later_time = now_time + 10
-
-        counters = [
-            sample.Sample(
-                name='cpu',
-                type=sample.TYPE_CUMULATIVE,
-                volume=125000000000,
-                unit='ns',
-                user_id='test_user',
-                project_id='test_proj',
-                resource_id='test_resource',
-                timestamp=now.isoformat(),
-                monotonic_time=now_time,
-                resource_metadata={'cpu_number': 4}
-            ),
-            sample.Sample(
-                name='cpu',
-                type=sample.TYPE_CUMULATIVE,
-                volume=165000000000,
-                unit='ns',
-                user_id='test_user',
-                project_id='test_proj',
-                resource_id='test_resource',
-                timestamp=later.isoformat(),
-                monotonic_time=later_time,
-                resource_metadata={'cpu_number': 4}
-            ),
-        ]
-
-        pipe.publish_data(counters)
-        publisher = pipe.publishers[0]
-        self.assertEqual(1, len(publisher.samples))
-
-        cpu_util_sample = publisher.samples[0]
-        self.assertAlmostEqual(100.0, cpu_util_sample.volume)
 
     def test_rate_of_change_max(self):
         s = "100.0 / (10**9 * (resource_metadata.cpu_number or 1))"
@@ -1215,7 +1240,7 @@ class BasePipelineTestCase(base.BaseTestCase):
         self.assertEqual(1, len(publisher.samples))
 
         cpu_util_sample = publisher.samples[0]
-        self.assertAlmostEqual(100.0, cpu_util_sample.volume)
+        self.assertEqual(100, cpu_util_sample.volume)
 
     @mock.patch('ceilometer.transformer.conversions.LOG')
     def test_rate_of_change_out_of_order(self, the_log):
@@ -1243,6 +1268,7 @@ class BasePipelineTestCase(base.BaseTestCase):
         earlier = now - datetime.timedelta(seconds=10)
         later = now + datetime.timedelta(seconds=10)
 
+        test_resource = 'test_resource_' + uuidutils.generate_uuid()
         counters = [
             sample.Sample(
                 name='cpu',
@@ -1251,7 +1277,7 @@ class BasePipelineTestCase(base.BaseTestCase):
                 unit='ns',
                 user_id='test_user',
                 project_id='test_proj',
-                resource_id='test_resource',
+                resource_id=test_resource,
                 timestamp=now.isoformat(),
                 resource_metadata={'cpu_number': 4}
             ),
@@ -1262,7 +1288,7 @@ class BasePipelineTestCase(base.BaseTestCase):
                 unit='ns',
                 user_id='test_user',
                 project_id='test_proj',
-                resource_id='test_resource',
+                resource_id=test_resource,
                 timestamp=earlier.isoformat(),
                 resource_metadata={'cpu_number': 4}
             ),
@@ -1273,7 +1299,7 @@ class BasePipelineTestCase(base.BaseTestCase):
                 unit='ns',
                 user_id='test_user',
                 project_id='test_proj',
-                resource_id='test_resource',
+                resource_id=test_resource,
                 timestamp=later.isoformat(),
                 resource_metadata={'cpu_number': 4}
             ),
@@ -1286,7 +1312,7 @@ class BasePipelineTestCase(base.BaseTestCase):
         self.assertEqual(1, len(publisher.samples))
 
         cpu_util_sample = publisher.samples[0]
-        self.assertAlmostEqual(12.5, cpu_util_sample.volume)
+        self.assertEqual(12.5, cpu_util_sample.volume)
         the_log.warning.assert_called_with(
             'dropping out of time order sample: %s',
             (counters[1],)
@@ -1299,10 +1325,12 @@ class BasePipelineTestCase(base.BaseTestCase):
         rate = 42
         later = now + datetime.timedelta(minutes=offset)
         counters = []
+        resource1 = 'resource1_' + uuidutils.generate_uuid()
+        resource2 = 'resource2_' + uuidutils.generate_uuid()
         for v, ts in [(base, now.isoformat()),
                       (base + (offset * 60 * rate), later.isoformat())]:
-            for n, u, r in [(meters[0], units[0], 'resource1'),
-                            (meters[1], units[1], 'resource2')]:
+            for n, u, r in [(meters[0], units[0], resource1),
+                            (meters[1], units[1], resource2)]:
                 s = sample.Sample(
                     name=n,
                     type=sample.TYPE_CUMULATIVE,
@@ -1323,13 +1351,13 @@ class BasePipelineTestCase(base.BaseTestCase):
         self.assertEqual(2, len(publisher.samples))
         bps = publisher.samples[0]
         self.assertEqual('%s.rate' % meters[0], getattr(bps, 'name'))
-        self.assertEqual('resource1', getattr(bps, 'resource_id'))
+        self.assertEqual(resource1, getattr(bps, 'resource_id'))
         self.assertEqual('%s/s' % units[0], getattr(bps, 'unit'))
         self.assertEqual(sample.TYPE_GAUGE, getattr(bps, 'type'))
         self.assertEqual(rate, getattr(bps, 'volume'))
         rps = publisher.samples[1]
         self.assertEqual('%s.rate' % meters[1], getattr(rps, 'name'))
-        self.assertEqual('resource2', getattr(rps, 'resource_id'))
+        self.assertEqual(resource2, getattr(rps, 'resource_id'))
         self.assertEqual('%s/s' % units[1], getattr(rps, 'unit'))
         self.assertEqual(sample.TYPE_GAUGE, getattr(rps, 'type'))
         self.assertEqual(rate, getattr(rps, 'volume'))
@@ -2139,6 +2167,7 @@ class BasePipelineTestCase(base.BaseTestCase):
         self.assertEqual(37, deltas[1].volume)
 
     def test_delta_transformer_out_of_order(self):
+        test_resource = "test_resource_" + uuidutils.generate_uuid()
         samples = [
             sample.Sample(
                 name='cpu',
@@ -2147,7 +2176,7 @@ class BasePipelineTestCase(base.BaseTestCase):
                 unit='ns',
                 user_id='test_user',
                 project_id='test_proj',
-                resource_id='test_resource',
+                resource_id=test_resource,
                 timestamp=timeutils.utcnow().isoformat(),
                 resource_metadata={'version': '1.0'}
             ),
@@ -2158,7 +2187,7 @@ class BasePipelineTestCase(base.BaseTestCase):
                 unit='ns',
                 user_id='test_user',
                 project_id='test_proj',
-                resource_id='test_resource',
+                resource_id=test_resource,
                 timestamp=((timeutils.utcnow() - datetime.timedelta(minutes=5))
                            .isoformat()),
                 resource_metadata={'version': '2.0'}
@@ -2170,7 +2199,7 @@ class BasePipelineTestCase(base.BaseTestCase):
                 unit='ns',
                 user_id='test_user_bis',
                 project_id='test_proj_bis',
-                resource_id='test_resource',
+                resource_id=test_resource,
                 timestamp=timeutils.utcnow().isoformat(),
                 resource_metadata={'version': '1.0'}
             ),

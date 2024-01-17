@@ -20,11 +20,25 @@ from oslo_log import log
 from oslo_utils import timeutils
 import six
 
+from ceilometer import cache_utils
 from ceilometer.i18n import _, _LW
 from ceilometer import sample
 from ceilometer import transformer
 
 LOG = log.getLogger(__name__)
+
+SAMPLE_CACHE_SECONDS = 60 * 10
+_CACHE = None
+
+
+def _get_cache_client(conf=None):
+    global _CACHE
+
+    if _CACHE is None:
+        _CACHE = cache_utils.get_client(conf=conf,
+                                        expiration_time=SAMPLE_CACHE_SECONDS)
+
+    return _CACHE
 
 
 class BaseConversionTransformer(transformer.TransformerBase):
@@ -42,6 +56,7 @@ class BaseConversionTransformer(transformer.TransformerBase):
         """
         self.source = source or {}
         self.target = target or {}
+        self.conf = kwargs.get("conf", None)
         super(BaseConversionTransformer, self).__init__(**kwargs)
 
     def _map(self, s, attr):
@@ -61,21 +76,23 @@ class BaseConversionTransformer(transformer.TransformerBase):
 class DeltaTransformer(BaseConversionTransformer):
     """Transformer based on the delta of a sample volume."""
 
-    def __init__(self, target=None, growth_only=False, **kwargs):
+    def __init__(self, target=None, growth_only=False,
+                 keep_remain_when_reset_zero=False,  **kwargs):
         """Initialize transformer with configured parameters.
 
         :param growth_only: capture only positive deltas
         """
         super(DeltaTransformer, self).__init__(target=target, **kwargs)
         self.growth_only = growth_only
-        self.cache = {}
+        self.keep_remain_when_reset_zero = keep_remain_when_reset_zero
+        self.cache = _get_cache_client(self.conf)
 
     def handle_sample(self, s):
         """Handle a sample, converting if necessary."""
-        key = s.name + s.resource_id
+        key = s.name + s.resource_id + "delta"
         prev = self.cache.get(key)
         timestamp = timeutils.parse_isotime(s.timestamp)
-        self.cache[key] = (s.volume, timestamp)
+        self.cache.set(key, (s.volume, timestamp))
 
         if prev:
             prev_volume = prev[0]
@@ -85,9 +102,11 @@ class DeltaTransformer(BaseConversionTransformer):
             if time_delta < 0:
                 LOG.warning(_LW('Dropping out of time order sample: %s'), (s,))
                 # Reset the cache to the newer sample.
-                self.cache[key] = prev
+                self.cache.set(key, prev)
                 return None
             volume_delta = s.volume - prev_volume
+            if self.keep_remain_when_reset_zero and volume_delta < 0:
+                volume_delta = s.volume
             if self.growth_only and volume_delta < 0:
                 LOG.warning(_LW('Negative delta detected, dropping value'))
                 s = None
@@ -178,41 +197,43 @@ class RateOfChangeTransformer(ScalingTransformer):
     def __init__(self, **kwargs):
         """Initialize transformer with configured parameters."""
         super(RateOfChangeTransformer, self).__init__(**kwargs)
-        self.cache = {}
+        self.cache = _get_cache_client(self.conf)
         self.scale = self.scale or '1'
 
     def handle_sample(self, s):
         """Handle a sample, converting if necessary."""
         LOG.debug('handling sample %s', s)
-        key = s.name + s.resource_id
+        key = s.name + s.resource_id + "rateofchange"
         prev = self.cache.get(key)
         timestamp = timeutils.parse_isotime(s.timestamp)
-        self.cache[key] = (s.volume, timestamp, s.monotonic_time)
+        self.cache.set(key, (s.volume, timestamp))
 
         if prev:
             prev_volume = prev[0]
             prev_timestamp = prev[1]
-            prev_monotonic_time = prev[2]
-            if (prev_monotonic_time is not None and
-                    s.monotonic_time is not None):
-                # NOTE(sileht): Prefer high precision timer
-                time_delta = s.monotonic_time - prev_monotonic_time
-            else:
-                time_delta = timeutils.delta_seconds(prev_timestamp, timestamp)
+            time_delta = timeutils.delta_seconds(prev_timestamp, timestamp)
             # disallow violations of the arrow of time
             if time_delta < 0:
                 LOG.warning(_('dropping out of time order sample: %s'), (s,))
                 # Reset the cache to the newer sample.
-                self.cache[key] = prev
+                self.cache.set(key, prev)
                 return None
             # we only allow negative volume deltas for noncumulative
             # samples, whereas for cumulative we assume that a reset has
             # occurred in the interim so that the current volume gives a
             # lower bound on growth
-            volume_delta = (s.volume - prev_volume
-                            if (prev_volume <= s.volume or
-                                s.type != sample.TYPE_CUMULATIVE)
-                            else s.volume)
+            # NOTE(xiexianbin): if get negative volume deltas for cumulative
+            # samples, just drop it. because prev_volume is thousands of
+            # times greater than s.volume, we may get wrong rate of change
+            # from this sample.
+            if prev_volume > s.volume and s.type == sample.TYPE_CUMULATIVE:
+                LOG.warning(_('dropping less than prev '
+                              'cumulative sample: %s'), (s,))
+                return None
+            elif prev_volume <= s.volume or s.type != sample.TYPE_CUMULATIVE:
+                volume_delta = s.volume - prev_volume
+            else:
+                volume_delta = s.volume
             rate_of_change = ((1.0 * volume_delta / time_delta)
                               if time_delta else 0.0)
 
