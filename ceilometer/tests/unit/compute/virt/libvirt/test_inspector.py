@@ -322,7 +322,10 @@ class TestLibvirtInspection(base.BaseTestCase):
             self.assertRaises(virt_inspector.InstanceShutOffException,
                               list, inspect(self.instance, None))
 
-    def test_inspect_disk_info(self):
+    @mock.patch('ceilometer.utils.execute')
+    def test_inspect_disk_info(self, mock_execute):
+        example_return = '''{"return": {"size": 102400}}'''
+        mock_execute.return_value = (example_return, '')
         dom_xml = """
              <domain type='kvm'>
                  <devices>
@@ -341,6 +344,7 @@ class TestLibvirtInspection(base.BaseTestCase):
         domain.XMLDesc.return_value = dom_xml
         domain.blockInfo.return_value = (1, 2, 3, -1)
         domain.info.return_value = (0, 0, 0, 2, 999999)
+        domain.name.return_value = ('instance-00000001')
         conn = mock.Mock()
         conn.lookupByUUIDString.return_value = domain
 
@@ -350,12 +354,18 @@ class TestLibvirtInspection(base.BaseTestCase):
                 self.instance, None))
 
             self.assertEqual(1, len(disks))
-            self.assertEqual('vda', disks[0].device)
-            self.assertEqual(3, disks[0].capacity)
-            self.assertEqual(2, disks[0].allocation)
-            self.assertEqual(3, disks[0].physical)
+            info0 = disks[0]
+            self.assertEqual(1, len(disks))
+            self.assertEqual('vda', info0.device)
+            self.assertEqual(1, info0.capacity)
+            self.assertEqual(2, info0.allocation)
+            self.assertEqual(3, info0.physical)
+            self.assertEqual(102400, info0.vmused)
 
-    def test_inspect_disk_info_network_type(self):
+    @mock.patch('ceilometer.utils.execute')
+    def test_inspect_disk_info_network_type(self, mock_execute):
+        example_return = '''{"return": {"size": 102400}}'''
+        mock_execute.return_value = (example_return, '')
         dom_xml = """
              <domain type='kvm'>
                  <devices>
@@ -374,6 +384,7 @@ class TestLibvirtInspection(base.BaseTestCase):
         domain.XMLDesc.return_value = dom_xml
         domain.blockInfo.return_value = (1, 2, 3, -1)
         domain.info.return_value = (0, 0, 0, 2, 999999)
+        domain.name.return_value = ('instance-00000001')
         conn = mock.Mock()
         conn.lookupByUUIDString.return_value = domain
 

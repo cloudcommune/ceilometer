@@ -25,11 +25,13 @@ import ceilometer.compute.virt.xenapi.inspector
 import ceilometer.event.converter
 import ceilometer.hardware.discovery
 import ceilometer.hardware.pollsters.generic
+import ceilometer.host.discovery
 import ceilometer.image.discovery
 import ceilometer.ipmi.platform.intel_node_manager
 import ceilometer.ipmi.pollsters
 import ceilometer.keystone_client
 import ceilometer.meter.notifications
+import ceilometer.monasca_opts
 import ceilometer.neutron_client
 import ceilometer.notification
 import ceilometer.nova_client
@@ -75,6 +77,7 @@ def list_opts():
                          ceilometer.pipeline.base.OPTS,
                          ceilometer.sample.OPTS,
                          ceilometer.utils.OPTS,
+                         ceilometer.host.discovery.OPTS,
                          OPTS)),
         ('compute', ceilometer.compute.discovery.OPTS),
         ('coordination', [
@@ -99,6 +102,7 @@ def list_opts():
          itertools.chain(ceilometer.ipmi.platform.intel_node_manager.OPTS,
                          ceilometer.ipmi.pollsters.OPTS)),
         ('meter', ceilometer.meter.notifications.OPTS),
+        ('monasca', ceilometer.monasca_opts.OPTS),
         ('notification',
          itertools.chain(ceilometer.notification.OPTS,
                          ceilometer.notification.EXCHANGES_OPTS)),

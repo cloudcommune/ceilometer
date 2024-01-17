@@ -73,6 +73,30 @@ class Client(object):
         return resp.get('ports')
 
     @logged
+    def get_network_ports(self, network_id):
+        params = {
+            'network_id': network_id,
+        }
+        resp = self.client.list_ports(**params)
+        # LOG.debug("ports of network: %s \n %s", network_id, str(resp))
+        return resp.get('ports')
+
+    @logged
+    def get_external_networks(self):
+        params = {
+            'router:external': True,
+        }
+
+        resp = self.client.list_networks(**params)
+        # LOG.debug("external networks: %s", str(resp))
+        return resp.get("networks")
+
+    @logged
+    def port_get(self, port):
+        resp = self.client.show_port(port)
+        return resp.get('port')
+
+    @logged
     def vip_get_all(self):
         resp = self.client.list_vips()
         return resp.get('vips')

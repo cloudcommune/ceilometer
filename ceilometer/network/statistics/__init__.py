@@ -85,8 +85,9 @@ class _Base(plugin_base.PollsterBase):
                     continue
                 if not isinstance(data, list):
                     data = [data]
-                for (volume, resource_id,
-                     resource_metadata, project_id) in data:
+                for _data in data:
+                    (volume, resource_id, resource_metadata) = _data[:3]
+                    project_id = _data[3] if len(_data) >= 4 else None
 
                     yield sample.Sample(
                         name=self.meter_name,

@@ -14,7 +14,10 @@
 # under the License.
 """Implementation of Inspector abstraction for libvirt."""
 
+import json
 from lxml import etree
+import os
+from oslo_concurrency import processutils
 from oslo_log import log as logging
 from oslo_utils import units
 import six
@@ -27,7 +30,8 @@ except ImportError:
 from ceilometer.compute.pollsters import util
 from ceilometer.compute.virt import inspector as virt_inspector
 from ceilometer.compute.virt.libvirt import utils as libvirt_utils
-from ceilometer.i18n import _
+from ceilometer.i18n import _LE, _LW, _
+from ceilometer.utils import convert_str
 
 LOG = logging.getLogger(__name__)
 
@@ -149,19 +153,248 @@ class LibvirtInspector(virt_inspector.Inspector):
                 wr_total_times=block_stats_flags['wr_total_times'],
                 rd_total_times=block_stats_flags['rd_total_times'])
 
-    @libvirt_utils.retry_on_disconnect
     def inspect_disk_info(self, instance, duration):
         domain = self._get_domain_not_shut_off_or_raise(instance)
-        for device in self._get_disk_devices(domain):
-            block_info = domain.blockInfo(device)
-            # if vm mount cdrom, libvirt will align by 4K bytes, capacity may
-            # be smaller than physical, avoid with this.
-            # https://libvirt.org/html/libvirt-libvirt-domain.html
-            disk_capacity = max(block_info[0], block_info[2])
-            yield virt_inspector.DiskInfo(device=device,
-                                          capacity=disk_capacity,
-                                          allocation=block_info[1],
-                                          physical=block_info[2])
+        tree = etree.fromstring(domain.XMLDesc(0))
+        instance_name = domain.name()
+        for disk in tree.findall('devices/disk'):
+            # NOTE(lhx): "cdrom" device associated to the configdrive
+            # no longer has a "source" element. Releated bug:
+            # https://bugs.launchpad.net/ceilometer/+bug/1622718
+            if disk.get('device') == 'cdrom':
+                continue
+            if disk.find('source') is None:
+                continue
+            target = disk.find('target')
+            device = target.get('dev')
+            real_used = -1
+            if device:
+                block_info = domain.blockInfo(device)
+                virsh_cmd = ['virsh', 'qemu-agent-command',
+                             convert_str(instance_name)]
+                args = """{
+                          "execute": "guest-get-disk-used",
+                          "arguments": {"device": "/dev/%s"}
+                        }""" % device
+                virsh_cmd.append(convert_str("%s" % args))
+                LOG.debug("virsh_cmd is '%s'" % ' '.join(virsh_cmd))
+                try:
+                    (out, error) = libvirt_utils.execute(*virsh_cmd,
+                                                         run_as_root=True)
+                    real_used = json.loads(out)['return']['size']
+                    LOG.debug("Get used size %(size)s of %(device)s in "
+                              "%(instance)s successfully.", {
+                                  'size': real_used, 'device': device,
+                                  'instance': instance_name})
+                except processutils.ProcessExecutionError as e:
+                    LOG.error(_LE('Get used size of %(device)s in '
+                                  '%(instance)s failed. The reason is '
+                                  '%(error)s') % {
+                        'device': device, 'instance': instance_name,
+                        'error': e.stderr})
+
+                info = virt_inspector.DiskInfo(device=device,
+                                               capacity=block_info[0],
+                                               allocation=block_info[1],
+                                               physical=block_info[2],
+                                               vmused=real_used)
+                yield info
+
+    def inspect_cc_ga_version(self, instance):
+        domain = self._get_domain_not_shut_off_or_raise(instance)
+        instance_name = domain.name()
+        version = 0.0
+        virsh_cmd = ['virsh', 'qemu-agent-command',
+                     convert_str(instance_name)]
+        args = """{
+                  "execute": "get-cloudcommune-guest-agent-version",
+                  "arguments": {}
+                }"""
+        args = args.replace(os.linesep, '')
+        virsh_cmd.append(convert_str("%s" % args))
+        try:
+            (out, error) = libvirt_utils.execute(*virsh_cmd,
+                                                 run_as_root=True)
+            version = json.loads(out)['return']['version']
+            LOG.info(
+                'Get CloudCommune guest agent version is %(version)s of '
+                '%(instance)s successfully.', {
+                    'version': version, 'instance': instance}
+            )
+        except processutils.ProcessExecutionError as e:
+            LOG.warning(
+                _LW('Get CloudCommune guest agent version of  '
+                    '%(instance)s failed. The reason is '
+                    '%(error)s') % {'instance': instance,
+                                    'error': e.stderr.replace(os.linesep, '')})
+        if float(version) <= float(1.0):
+            LOG.warning(
+                '%s CloudCommune guest agent version <= 1.0 does not supported gpu inspection',
+                instance
+            )
+            return False
+        else:
+            return True
+
+    def inspect_gpu_counts(self, instance):
+        domain = self._get_domain_not_shut_off_or_raise(instance)
+        instance_name = domain.name()
+        virsh_cmd = ['virsh', 'qemu-agent-command',
+                     convert_str(instance_name)]
+        args = """{
+                  "execute": "guest-get-gpu-counts",
+                  "arguments": {}
+                }"""
+        args = args.replace(os.linesep, '')
+        virsh_cmd.append(convert_str("%s" % args))
+        try:
+            (out, error) = libvirt_utils.execute(*virsh_cmd,
+                                                 run_as_root=True)
+            counts = json.loads(out)['return']['size']
+            LOG.debug(
+                'Get gpu counts %(size)s of '
+                '%(instance)s successfully.', {
+                    'size': counts, 'instance': instance}
+            )
+        except processutils.ProcessExecutionError as e:
+            LOG.warning(
+                _LW('Get gpu counts of  '
+                    '%(instance)s failed. The reason is '
+                    '%(error)s') % {'instance': instance,
+                                    'error': e.stderr.replace(os.linesep, '')})
+        return int(counts)
+
+    def inspect_gpu_memory_total(self, instance, id):
+        domain = self._get_domain_not_shut_off_or_raise(instance)
+        instance_name = domain.name()
+        virsh_cmd = ['virsh', 'qemu-agent-command',
+                     convert_str(instance_name)]
+        args = """{
+                  "execute": "guest-get-gpu-memory-total",
+                  "arguments": {"device": "%s"}
+               }""" % id
+        args = args.replace(os.linesep, '')
+        virsh_cmd.append(convert_str("%s" % args))
+        try:
+            (out, error) = libvirt_utils.execute(*virsh_cmd,
+                                                 run_as_root=True)
+            memory_total = json.loads(out)['return']['size']
+            LOG.debug(
+                'Get gpu memory total size %(size)s of %(device)s in '
+                '%(instance)s successfully.', {
+                    'size': memory_total, 'device': id,
+                    'instance': instance})
+        except processutils.ProcessExecutionError as e:
+            LOG.warning(
+                _LW('Get gpu memory total size of %(device)s in '
+                    '%(instance)s failed. The reason is '
+                    '%(error)s') % {
+                    'device': id, 'instance': instance,
+                    'error': e.stderr.replace(os.linesep, '')})
+        return virt_inspector.GpuInfo(
+            memory_total=memory_total,
+            memory_used='null',
+            temperature='null',
+            util='null')
+
+    def inspect_gpu_memory_used(self, instance, id):
+        domain = self._get_domain_not_shut_off_or_raise(instance)
+        instance_name = domain.name()
+        virsh_cmd = ['virsh', 'qemu-agent-command',
+                     convert_str(instance_name)]
+        args = """{
+                  "execute": "guest-get-gpu-memory-used",
+                  "arguments": {"device": "%s"}
+               }""" % id
+        args = args.replace(os.linesep, '')
+        virsh_cmd.append(convert_str("%s" % args))
+        try:
+            (out, error) = libvirt_utils.execute(*virsh_cmd,
+                                                 run_as_root=True)
+            memory_used = json.loads(out)['return']['size']
+            LOG.info(
+                'Get gpu memory used size %(size)s of %(device)s in '
+                '%(instance)s successfully.', {
+                    'size': memory_used, 'device': id,
+                    'instance': instance})
+        except processutils.ProcessExecutionError as e:
+            LOG.warning(
+                _LW('Get gpu memory used size of %(device)s in '
+                    '%(instance)s failed. The reason is '
+                    '%(error)s') % {
+                    'device': id, 'instance': instance,
+                    'error': e.stderr.replace(os.linesep, '')})
+        return virt_inspector.GpuInfo(
+            memory_total='null',
+            memory_used=memory_used,
+            temperature='null',
+            util='null')
+
+    def inspect_gpu_util(self, instance, id):
+        domain = self._get_domain_not_shut_off_or_raise(instance)
+        instance_name = domain.name()
+        virsh_cmd = ['virsh', 'qemu-agent-command',
+                     convert_str(instance_name)]
+        args = """{
+                  "execute": "guest-get-gpu-utilization",
+                  "arguments": {"device": "%s"}
+               }""" % id
+        args = args.replace(os.linesep, '')
+        virsh_cmd.append(convert_str("%s" % args))
+        try:
+            (out, error) = libvirt_utils.execute(*virsh_cmd,
+                                                 run_as_root=True)
+            utilization = json.loads(out)['return']['size']
+            LOG.info(
+                'Get gpu utilization used size %(size)s of %(device)s in '
+                '%(instance)s successfully.', {
+                    'size': utilization, 'device': id,
+                    'instance': instance})
+        except processutils.ProcessExecutionError as e:
+            LOG.warning(
+                _LW('Get gpu  used size of %(device)s in '
+                    '%(instance)s failed. The reason is '
+                    '%(error)s') % {
+                    'device': id, 'instance': instance,
+                    'error': e.stderr.replace(os.linesep, '')})
+        return virt_inspector.GpuInfo(
+            memory_total='null',
+            memory_used='null',
+            temperature='null',
+            util=utilization)
+
+    def inspect_gpu_temperature(self, instance, id):
+        domain = self._get_domain_not_shut_off_or_raise(instance)
+        instance_name = domain.name()
+        virsh_cmd = ['virsh', 'qemu-agent-command',
+                     convert_str(instance_name)]
+        args = """{
+                  "execute": "guest-get-gpu-temperature",
+                  "arguments": {"device": "%s"}
+               }""" % id
+        args = args.replace(os.linesep, '')
+        virsh_cmd.append(convert_str("%s" % args))
+        try:
+            (out, error) = libvirt_utils.execute(*virsh_cmd,
+                                                 run_as_root=True)
+            temperature = json.loads(out)['return']['size']
+            LOG.info(
+                'Get gpu temperature %(size)s of %(device)s in '
+                '%(instance)s successfully.', {
+                    'size': temperature, 'device': id,
+                    'instance': instance})
+        except processutils.ProcessExecutionError as e:
+            LOG.warning(
+                _LW('Get gpu temperature of %(device)s in '
+                    '%(instance)s failed. The reason is '
+                    '%(error)s') % {
+                    'device': id, 'instance': instance,
+                    'error': e.stderr.replace(os.linesep, '')})
+        return virt_inspector.GpuInfo(
+            memory_total='null',
+            memory_used='null',
+            temperature=temperature,
+            util='null')
 
     @libvirt_utils.raise_nodata_if_unsupported
     @libvirt_utils.retry_on_disconnect

@@ -139,7 +139,7 @@ class HttpPublisher(publisher.ConfigPublisherBase):
             scheme,
             netloc,
             parsed_url.path,
-            urlparse.urlencode(params, doseq=True),
+            urlparse.urlencode(params),
             parsed_url.fragment])
 
         self.session.mount(self.target, adapters.HTTPAdapter(**kwargs))

@@ -20,7 +20,10 @@
 
 import threading
 
+from oslo_concurrency import processutils
 from oslo_config import cfg
+from oslo_utils import encodeutils
+import six
 
 ROOTWRAP_CONF = "/etc/ceilometer/rootwrap.conf"
 
@@ -30,6 +33,31 @@ OPTS = [
                help='Path to the rootwrap configuration file to '
                     'use for running commands as root'),
 ]
+
+
+def convert_str(text):
+    """Convert to native string.
+
+    Convert bytes and Unicode strings to native strings:
+
+    * convert to bytes on Python 2:
+      encode Unicode using encodeutils.safe_encode()
+    * convert to Unicode on Python 3: decode bytes from UTF-8
+    """
+    if six.PY2:
+        return encodeutils.to_utf8(text)
+    else:
+        if isinstance(text, bytes):
+            return text.decode('utf-8')
+        else:
+            return text
+
+
+def execute(*cmd, **kwargs):
+    """Convenience wrapper around oslo's execute() method."""
+    if 'run_as_root' in kwargs and 'root_helper' not in kwargs:
+        kwargs['root_helper'] = _get_root_helper()
+    return processutils.execute(*cmd, **kwargs)
 
 
 def _get_root_helper():

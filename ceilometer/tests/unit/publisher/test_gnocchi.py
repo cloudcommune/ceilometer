@@ -111,8 +111,8 @@ IMAGE_DELETE_START = models.Event(
 )
 
 
-VOLUME_DELETE_END = models.Event(
-    event_type=u'volume.delete.end',
+VOLUME_DELETE_START = models.Event(
+    event_type=u'volume.delete.start',
     traits=[models.Trait(u'availability_zone', 1, u'nova'),
             models.Trait(u'created_at', 1, u'2016-11-28T13:19:53+00:00'),
             models.Trait(u'display_name', 1, u'vol-001'),
@@ -151,28 +151,6 @@ FLOATINGIP_DELETE_END = models.Event(
     raw={},
     generated='2016-11-29T09:25:55.474710',
     message_id=u'a15b94ee-cb8e-4c71-9abe-14aa80055fb4'
-)
-
-VOLUME_TRANSFER_ACCEPT_END = models.Event(
-    event_type='volume.transfer.accept.end',
-    traits=[models.Trait(u'tenant_id', 1, '945e7d09220e4308abe4b3b734bf5fce>'),
-            models.Trait(u'project_id', 1, '85bc015f7a2342348593077a927c4aaa'),
-            models.Trait(u'user_id', 1, '945e7d09220e4308abe4b3b734bf5fce'),
-            models.Trait(u'service', 1, 'volume.controller-0'),
-            models.Trait(
-                u'request_id', 1, 'req-71dd1ae4-81ca-431a-b9fd-ac833eba889f'),
-            models.Trait(
-                u'resource_id', 1, '156b8d3f-ad99-429b-b84c-3f263fb2a801'),
-            models.Trait(
-                u'display_name', 1, 'test-vol'),
-            models.Trait(
-                u'type', 1, 'req-71dd1ae4-81ca-431a-b9fd-ac833eba889f'),
-            models.Trait(u'host', 1, 'hostgroup@tripleo_iscsi#tripleo_iscsi'),
-            models.Trait(u'created_at', 4, '2020-08-28 12:51:52'),
-            models.Trait(u'size', 2, 1)],
-    raw={},
-    generated='2020-08-28T12:52:22.930413',
-    message_id=u'9fc4ceee-d980-4098-a685-2ad660838ac1'
 )
 
 
@@ -571,7 +549,7 @@ class PublisherWorkflowTest(base.BaseTestCase,
 
         self.publisher.publish_events([INSTANCE_DELETE_START,
                                        IMAGE_DELETE_START,
-                                       VOLUME_DELETE_END,
+                                       VOLUME_DELETE_START,
                                        FLOATINGIP_DELETE_END])
         self.assertEqual(8, len(fakeclient.mock_calls))
         for call in expected_calls:
@@ -600,28 +578,6 @@ class PublisherWorkflowTest(base.BaseTestCase,
         ]
 
         self.publisher.publish_events([INSTANCE_CREATE_END])
-        self.assertEqual(1, len(fakeclient.mock_calls))
-        for call in expected_calls:
-            self.assertIn(call, fakeclient.mock_calls)
-
-    @mock.patch('gnocchiclient.v1.client.Client')
-    def test_update_event_workflow(self, fakeclient_cls):
-        url = netutils.urlsplit("gnocchi://")
-        self.publisher = gnocchi.GnocchiPublisher(self.conf.conf, url)
-
-        fakeclient = fakeclient_cls.return_value
-
-        now = timeutils.utcnow()
-        self.useFixture(utils_fixture.TimeFixture(now))
-
-        expected_calls = [
-            mock.call.resource.update(
-                'volume',
-                '156b8d3f-ad99-429b-b84c-3f263fb2a801',
-                {'project_id': '85bc015f7a2342348593077a927c4aaa'}),
-        ]
-
-        self.publisher.publish_events([VOLUME_TRANSFER_ACCEPT_END])
         self.assertEqual(1, len(fakeclient.mock_calls))
         for call in expected_calls:
             self.assertIn(call, fakeclient.mock_calls)

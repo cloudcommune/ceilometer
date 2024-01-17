@@ -100,6 +100,13 @@ InterfaceRateStats = collections.namedtuple('InterfaceRateStats',
                                              'rx_bytes_rate', 'tx_bytes_rate'])
 
 
+# Named tuple representing disks.
+#
+# device: the device name for the disk
+#
+Disk = collections.namedtuple('Disk', ['device'])
+
+
 # Named tuple representing disk statistics.
 #
 # read_bytes: number of bytes read
@@ -154,7 +161,21 @@ DiskInfo = collections.namedtuple('DiskInfo',
                                   ['device',
                                    'capacity',
                                    'allocation',
-                                   'physical'])
+                                   'physical',
+                                   'vmused'])
+
+# Named tuple representing gpu Information.
+#
+# memory_total: memory total of the gpu
+# memory_used: memory used of the gpu
+# temperature: temperature of the gpu
+# util: usage of the gpu
+#
+GpuInfo = collections.namedtuple('GpuInfo',
+                                 ['memory_total',
+                                  'memory_used',
+                                  'temperature',
+                                  'util'])
 
 
 # Exception types

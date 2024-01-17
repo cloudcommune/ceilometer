@@ -105,3 +105,10 @@ class PerDeviceDiskWriteLatencyPollster(PerDeviceDiskPollster):
     sample_type = sample.TYPE_CUMULATIVE
     sample_unit = 'ns'
     sample_stats_key = 'wr_total_times'
+
+
+class PerDeviceVMusedPollster(PerDeviceDiskPollster):
+    inspector_method = 'inspect_disk_info'
+    sample_name = 'disk.device.vmused'
+    sample_unit = 'B'
+    sample_stats_key = 'vmused'

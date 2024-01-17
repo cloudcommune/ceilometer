@@ -24,6 +24,7 @@ except ImportError:
 
 from ceilometer.compute.virt import inspector as virt_inspector
 from ceilometer.i18n import _
+from ceilometer import utils
 
 LOG = logging.getLogger(__name__)
 
@@ -124,3 +125,7 @@ def raise_nodata_if_unsupported(method):
                         "error": e}
             raise virt_inspector.NoDataException(msg)
     return inner
+
+
+def execute(*args, **kwargs):
+    return utils.execute(*args, **kwargs)

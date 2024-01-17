@@ -94,10 +94,8 @@ class OpencontrailDriver(driver.Driver):
             return
 
         data = self._prepare_cache(endpoint, params, cache)
-
         ports = data['n_client'].port_get_all()
         ports_map = dict((port['id'], port) for port in ports)
-
         resource = params.get('resource', ['if_stats_list'])[0]
         fqdn_uuid = params.get('fqdn_uuid', ['*'])[0]
         virtual_network = params.get('virtual_network', [None])[0]
